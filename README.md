@@ -93,5 +93,3 @@ Because SinricPro uses a virtual Thermostat to represent the battery, Alexa will
 - **Git Safety:** The `.gitignore` file is configured to prevent your `.env` from ever being uploaded to a public repository.
 - **Android Tip:** In Termux, pull down the notification bar and select **"Acquire Wakelock"** to prevent Android from killing the script when the screen is off.
 
-## 🤝 Contributing
-Contributions are welcome! If you have a different inverter brand (Sunsynk, Victron, etc.), feel free to submit a Pull Request with the corresponding data key mappings.
