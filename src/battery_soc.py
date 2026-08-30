@@ -1,6 +1,10 @@
 """
-Solar Battery Alexa Bridge (Production Version)
+Solar Battery Alexa Bridge (Production Version 1.2)
 Description: Polls Solarman (Deye) API for Battery SoC and pushes to SinricPro.
+Enhancements: 
+    - WebSocket Health Monitor: Exits after 10 failed cycles to trigger Watchdog reboot.
+    - Improved Error Handling for DNS/Network failures.
+
 Features: 
     - Throttling (updates only on change or 30-min heartbeat)
     - Connection pooling via requests.Session
@@ -55,6 +59,7 @@ INVERTER_SN = get_env_var("INVERTER_SN")
 HEALTH_URL = get_env_var("HEALTHCHECKS_URL", required=False)
 POLL_INTERVAL = 300  # 5 minutes
 FORCE_UPDATE_INTERVAL = 1800  # 30 minutes heartbeat
+MAX_OFFLINE_CYCLES = 10  # Exit after 50 minutes of disconnection
 
 
 class SolarmanClient:
@@ -63,7 +68,7 @@ class SolarmanClient:
     def __init__(self):
         self.token: Optional[str] = None
         self.base_url = "https://globalapi.solarmanpv.com"
-        self.session = requests.Session()  # Use session for connection pooling
+        self.session = requests.Session()
 
     def _get_token(self) -> bool:
         """Authenticates with Solarman and retrieves an access token."""
@@ -101,7 +106,6 @@ class SolarmanClient:
         try:
             response = self.session.post(url, headers=headers, json=payload, timeout=20)
 
-            # Handle expired token
             if response.status_code == 401:
                 if self._get_token():
                     headers["Authorization"] = f"bearer {self.token}"
@@ -111,11 +115,10 @@ class SolarmanClient:
 
             data = response.json()
             for item in data.get("dataList", []):
-                # Key specific to Deye/Solarman SoC
                 if item.get("key") == "B_left_cap1":
                     return float(item.get("value"))
             
-            logger.warning(f"SoC key 'B_left_cap1' not found in API response.")
+            logger.warning("SoC key 'B_left_cap1' not found in API response.")
         except requests.exceptions.RequestException as e:
             logger.warning(f"Solarman API connection issue: {e}")
         except Exception as e:
@@ -135,7 +138,6 @@ async def main():
 
     # Background task for WebSocket connection
     sinric_task = asyncio.create_task(sinric.begin(config))
-    
     # Allow time for SinricPro handshake
     logger.info("Initializing SinricPro connection...")
     await asyncio.sleep(5)
@@ -143,38 +145,53 @@ async def main():
     # State tracking variables
     last_sent_soc: float = -1.0
     last_update_time = datetime.min
+    offline_cycles = 0  # Counter for consecutive connection failures
     
     logger.info(f"Solar Bridge Operational. Polling: {POLL_INTERVAL}s")
 
     try:
         while True:
+            # 1. Check SinricPro Connection Health
+            if not sinric.is_connected():
+                offline_cycles += 1
+                logger.warning(f"SinricPro is OFFLINE. Attempting to recover... ({offline_cycles}/{MAX_OFFLINE_CYCLES})")
+                
+                if offline_cycles >= MAX_OFFLINE_CYCLES:
+                    logger.critical("Maximum offline cycles reached. Forcing exit for Watchdog reboot.")
+                    break # Exit loop to trigger cleanup and script restart
+            else:
+                if offline_cycles > 0:
+                    logger.info("SinricPro connection restored.")
+                offline_cycles = 0 # Reset counter on successful connection
+
+            # 2. Fetch data from Solarman
             current_soc = solarman.get_battery_soc()
             now = datetime.now()
 
             if current_soc is not None:
-                # Update logic: Only push if value changed OR heartbeat interval reached
+                # 3. Decision Logic: Push if changed OR heartbeat interval reached
                 seconds_since_last = (now - last_update_time).total_seconds()
                 needs_update = (current_soc != last_sent_soc) or (seconds_since_last >= FORCE_UPDATE_INTERVAL)
 
                 if needs_update:
-                    reason = "Change" if current_soc != last_sent_soc else "Heartbeat"
-                    logger.info(f"Pushing SoC {current_soc}% to Alexa ({reason})")
-                    
-                    # Push to SinricPro (Using SoC for both Temp/Humidity for UI visibility)
-                    success = await battery_device.send_temperature_event(current_soc, current_soc)
-                    
-                    if success:
-                        last_sent_soc = current_soc
-                        last_update_time = now
-                        
-                        # Ping Healthchecks.io if configured
-                        if HEALTH_URL:
-                            try:
-                                requests.get(HEALTH_URL, timeout=5)
-                            except Exception as e:
-                                logger.debug(f"Healthcheck ping failed: {e}")
+                    # Skip push if we know we are offline (saves API credits and prevents hanging)
+                    if not sinric.is_connected():
+                        logger.debug("Skipping push: WebSocket is currently disconnected.")
                     else:
-                        logger.warning("SinricPro server rejected the push event.")
+                        reason = "Change" if current_soc != last_sent_soc else "Heartbeat"
+                        logger.info(f"Pushing SoC {current_soc}% to Alexa ({reason})")
+                        
+                        success = await battery_device.send_temperature_event(current_soc, current_soc)
+                        
+                        if success:
+                            last_sent_soc = current_soc
+                            last_update_time = now
+                            
+                            if HEALTH_URL:
+                                try: requests.get(HEALTH_URL, timeout=5)
+                                except Exception: pass
+                        else:
+                            logger.warning("SinricPro server rejected the push event.")
                 else:
                     logger.debug(f"SoC {current_soc}% unchanged. Skipping push.")
             else:
@@ -190,10 +207,13 @@ async def main():
         logger.info("Cleaning up resources...")
         sinric_task.cancel()
         try:
+            # Wait for clean close of the WebSocket
             await asyncio.gather(sinric_task, return_exceptions=True)
         except Exception:
             pass
         logger.info("Bridge stopped cleanly.")
+        # Final exit to ensure Watchdog picks up the failure
+        sys.exit(1 if offline_cycles >= MAX_OFFLINE_CYCLES else 0)
 
 
 if __name__ == "__main__":
