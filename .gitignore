@@ -1,15 +1,32 @@
 # Secrets and Environment
 .env
+.env.*
+!.env.example
 
 # Python Virtual Environments
 .venv/
 venv/
 env/
 
-# Python Cache
+# Python Cache & Packaging
 __pycache__/
 *.py[cod]
 *.class
+*.egg-info/
+dist/
+build/
+
+# Tool Caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Runtime Logs & Status
+logs/
+*.log
+*.pid
+nohup.out
+status.json
 
 # OS Specific
 .DS_Store
@@ -19,7 +36,3 @@ __pycache__/
 .Trashes
 ehthumbs.db
 Thumbs.db
-
-# Logs
-*.log
-nohup.out
