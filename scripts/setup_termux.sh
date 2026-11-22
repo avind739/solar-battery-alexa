@@ -20,7 +20,11 @@ echo "=== Solar Battery Alexa Bridge: Termux Setup ==="
 echo "Project directory: $PROJECT_ROOT"
 
 # 1. Ensure scripts are executable
-chmod +x "$PROJECT_ROOT/scripts/watchdog.sh" "$PROJECT_ROOT/scripts/stop.sh" "$PROJECT_ROOT/scripts/setup_termux.sh"
+chmod +x \
+    "$PROJECT_ROOT/scripts/watchdog.sh" \
+    "$PROJECT_ROOT/scripts/start.sh" \
+    "$PROJECT_ROOT/scripts/stop.sh" \
+    "$PROJECT_ROOT/scripts/setup_termux.sh"
 
 # 2. Resolve Python & install pure-Python runtime dependencies
 if command -v python3 >/dev/null 2>&1; then
@@ -136,6 +140,7 @@ echo ""
 echo "=== Setup Complete ==="
 echo "Logs:   tail -f ${PROJECT_ROOT}/logs/watchdog.log ${PROJECT_ROOT}/logs/bridge.log"
 echo "Status: cat ${PROJECT_ROOT}/status.json"
+echo "Start:  ${PROJECT_ROOT}/scripts/start.sh"
 echo "Stop:   ${PROJECT_ROOT}/scripts/stop.sh"
 echo ""
 echo "Android checklist for reliable 24/7 operation:"

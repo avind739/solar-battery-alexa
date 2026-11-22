@@ -61,6 +61,7 @@ flowchart LR
 | `src/battery_test.py` | Interactive CLI simulator for manually testing SinricPro -> Alexa updates. |
 | `scripts/watchdog.sh` | Termux-safe supervisor (`#!/usr/bin/env bash`): enforces single instance via PID lock, acquires `termux-wake-lock`, checks connectivity, restarts quickly after clean recycle (`exit 42`), and backs off on errors. |
 | `scripts/setup_termux.sh` | Idempotent one-command Termux installer: installs runtime deps, initializes `~/.config/solar-battery-alexa/.env` (`chmod 600`), configures `~/.termux/boot/` and `~/.bashrc`, and launches the watchdog. |
+| `scripts/start.sh` | Starts `watchdog.sh` in the background if not already running and prints the watchdog PID and log path. |
 | `scripts/stop.sh` | Gracefully stops the running watchdog + bridge and releases `termux-wake-lock`. |
 
 ---

@@ -29,6 +29,7 @@ solar-battery-alexa/
 │   └── adr/                        # Architecture Decision Records
 ├── scripts/
 │   ├── setup_termux.sh             # One-command Termux installer & auto-start setup
+│   ├── start.sh                    # Starts watchdog & bridge in the background
 │   ├── watchdog.sh                 # PID-locked supervisor with wakelock & backoff
 │   └── stop.sh                     # Cleanly stops watchdog & bridge
 ├── src/
@@ -128,8 +129,10 @@ python src/battery_soc.py
 tail -f logs/watchdog.log logs/bridge.log
 cat status.json
 
-# Stop cleanly
+# Start / stop / restart cleanly in the background
+./scripts/start.sh
 ./scripts/stop.sh
+./scripts/stop.sh && ./scripts/start.sh
 ```
 
 ---

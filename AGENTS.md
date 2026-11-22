@@ -29,6 +29,7 @@ Read [`docs/system-design.md`](docs/system-design.md) and [`docs/adr/README.md`]
 - `src/battery_test.py` — Manual interactive Alexa simulator.
 - `scripts/watchdog.sh` — Termux-safe supervisor (PID lock, `termux-wake-lock`, backoff, logs).
 - `scripts/setup_termux.sh` — Idempotent Termux installer (`Termux:Boot`, `~/.bashrc`, `~/.config/.../.env`).
+- `scripts/start.sh` — Starts watchdog and bridge cleanly in the background.
 - `scripts/stop.sh` — Stops running watchdog and bridge cleanly.
 - `tests/` — Offline unit tests (`pytest` + `pytest-asyncio`).
 - `docs/` — System design and Architecture Decision Records (ADRs).
@@ -79,7 +80,7 @@ make check
 make test        # Runs pytest
 make lint        # Runs ruff check .
 make typecheck   # Runs pyright
-bash -n scripts/watchdog.sh scripts/setup_termux.sh scripts/stop.sh
+bash -n scripts/*.sh
 ```
 
 If `shellcheck` is installed:
