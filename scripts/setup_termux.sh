@@ -102,10 +102,13 @@ PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -m solar_bridge --env-file "$ENV_FI
 mkdir -p "$BOOT_DIR"
 cat > "$BOOT_SCRIPT" <<EOF
 #!/usr/bin/env bash
-termux-wake-lock >/dev/null 2>&1 || true
-nohup "${PROJECT_ROOT}/scripts/watchdog.sh" >/dev/null 2>&1 &
+export PATH="\${PREFIX:-/data/data/com.termux/files/usr}/bin:\$PATH"
+bash "${PROJECT_ROOT}/scripts/start.sh"
 EOF
 chmod +x "$BOOT_SCRIPT"
+if command -v termux-fix-shebang >/dev/null 2>&1; then
+    termux-fix-shebang "$BOOT_SCRIPT"
+fi
 echo "Installed Termux:Boot script at $BOOT_SCRIPT"
 
 # 6. Configure idempotent ~/.bashrc auto-start (when opening Termux)
@@ -124,8 +127,8 @@ fi
 
 cat >> "$BASHRC" <<EOF
 ${MARKER_START}
-if [ -x "${PROJECT_ROOT}/scripts/watchdog.sh" ]; then
-    nohup "${PROJECT_ROOT}/scripts/watchdog.sh" >/dev/null 2>&1 &
+if [ -f "${PROJECT_ROOT}/scripts/start.sh" ]; then
+    bash "${PROJECT_ROOT}/scripts/start.sh" >/dev/null 2>&1 || true
 fi
 ${MARKER_END}
 EOF
@@ -133,8 +136,7 @@ echo "Configured auto-start hook in $BASHRC"
 
 # 7. Launch watchdog immediately
 echo "Starting Solar Battery Alexa Bridge in background..."
-nohup "$PROJECT_ROOT/scripts/watchdog.sh" >/dev/null 2>&1 &
-sleep 1
+bash "$PROJECT_ROOT/scripts/start.sh"
 
 echo ""
 echo "=== Setup Complete ==="

@@ -17,7 +17,12 @@ BRIDGE_PID_FILE="$LOG_DIR/bridge.pid"
 mkdir -p "$LOG_DIR"
 
 log() {
-    printf '%s [watchdog] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$WATCHDOG_LOG"
+    local line
+    line="$(printf '%s [watchdog] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*")"
+    printf '%s\n' "$line" >> "$WATCHDOG_LOG"
+    if [ -t 1 ]; then
+        printf '%s\n' "$line"
+    fi
 }
 
 # Single-instance guard
@@ -30,18 +35,38 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 echo "$$" > "$PID_FILE"
+log "Watchdog initializing (PID $$)..."
 
 WAKELOCK_ACQUIRED=0
 if command -v termux-wake-lock >/dev/null 2>&1; then
-    if termux-wake-lock >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then
+        if timeout 5 termux-wake-lock >/dev/null 2>&1; then
+            WAKELOCK_ACQUIRED=1
+            log "Acquired Termux wakelock."
+        else
+            log "WARNING: termux-wake-lock timed out or failed; continuing without blocking."
+        fi
+    else
+        termux-wake-lock >/dev/null 2>&1 &
         WAKELOCK_ACQUIRED=1
-        log "Acquired Termux wakelock."
+        log "Requested Termux wakelock in background."
     fi
 fi
 
 CHILD_PID=""
+SLEEP_PID=""
+
+interruptible_sleep() {
+    sleep "$1" &
+    SLEEP_PID=$!
+    wait "$SLEEP_PID" 2>/dev/null || true
+    SLEEP_PID=""
+}
 
 cleanup() {
+    if [ -n "$SLEEP_PID" ] && kill -0 "$SLEEP_PID" 2>/dev/null; then
+        kill -TERM "$SLEEP_PID" 2>/dev/null || true
+    fi
     if [ -n "$CHILD_PID" ] && kill -0 "$CHILD_PID" 2>/dev/null; then
         log "Stopping bridge process (PID $CHILD_PID)..."
         kill -TERM "$CHILD_PID" 2>/dev/null || true
@@ -52,7 +77,11 @@ cleanup() {
         rm -f "$PID_FILE"
     fi
     if [ "$WAKELOCK_ACQUIRED" -eq 1 ] && command -v termux-wake-unlock >/dev/null 2>&1; then
-        termux-wake-unlock >/dev/null 2>&1 || true
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 5 termux-wake-unlock >/dev/null 2>&1 || true
+        else
+            termux-wake-unlock >/dev/null 2>&1 || true
+        fi
         log "Released Termux wakelock."
     fi
 }
@@ -77,6 +106,18 @@ else
     exit 1
 fi
 
+# Default LOG_FILE and STATUS_FILE when not already configured in .env or env
+ENV_CANDIDATE="${SOLAR_BRIDGE_ENV:-${HOME}/.config/solar-battery-alexa/.env}"
+if [ ! -f "$ENV_CANDIDATE" ] && [ -f "$PROJECT_ROOT/.env" ]; then
+    ENV_CANDIDATE="$PROJECT_ROOT/.env"
+fi
+if [ -z "${LOG_FILE:-}" ] && { [ ! -f "$ENV_CANDIDATE" ] || ! grep -q '^LOG_FILE=' "$ENV_CANDIDATE" 2>/dev/null; }; then
+    export LOG_FILE="$LOG_DIR/bridge.log"
+fi
+if [ -z "${STATUS_FILE:-}" ] && { [ ! -f "$ENV_CANDIDATE" ] || ! grep -q '^STATUS_FILE=' "$ENV_CANDIDATE" 2>/dev/null; }; then
+    export STATUS_FILE="$PROJECT_ROOT/status.json"
+fi
+
 cd "$PROJECT_ROOT" || exit 1
 log "Watchdog started (PID $$, python=$PYTHON_BIN)."
 
@@ -88,7 +129,8 @@ while true; do
         START_TS="$(date +%s)"
         log "Internet OK. Starting Solar Bridge..."
 
-        PYTHONPATH="$PROJECT_ROOT/src" "$PYTHON_BIN" -m solar_bridge "$@" >> "$WATCHDOG_LOG" 2>&1 &
+        PYTHONUNBUFFERED=1 PYTHONPATH="$PROJECT_ROOT/src" \
+            "$PYTHON_BIN" -u -m solar_bridge "$@" >> "$WATCHDOG_LOG" 2>&1 &
         CHILD_PID=$!
         echo "$CHILD_PID" > "$BRIDGE_PID_FILE"
 
@@ -106,13 +148,13 @@ while true; do
         elif [ "$EXIT_CODE" -eq 42 ]; then
             log "Scheduled clean recycle (code 42, uptime=${UPTIME}s). Restarting in 5s..."
             BACKOFF=30
-            sleep 5
+            interruptible_sleep 5
         else
             if [ "$UPTIME" -ge 120 ]; then
                 BACKOFF=30
             fi
             log "Bridge exited with code $EXIT_CODE (uptime=${UPTIME}s). Restarting in ${BACKOFF}s..."
-            sleep "$BACKOFF"
+            interruptible_sleep "$BACKOFF"
             BACKOFF=$((BACKOFF * 2))
             if [ "$BACKOFF" -gt "$MAX_BACKOFF" ]; then
                 BACKOFF=$MAX_BACKOFF
@@ -120,6 +162,6 @@ while true; do
         fi
     else
         log "No internet connectivity. Retrying in 60s..."
-        sleep 60
+        interruptible_sleep 60
     fi
 done
